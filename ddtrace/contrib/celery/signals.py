@@ -13,6 +13,11 @@ log = get_logger(__name__)
 propagator = HTTPPropagator()
 
 
+def _get_headers(request):
+    # In some cases (like Redis broker) headers are merged with `task.request`.
+    return request.get('headers') or request or {}
+
+
 def trace_prerun(*args, **kwargs):
     # safe-guard to avoid crashes in case the signals API
     # changes in Celery
@@ -30,7 +35,7 @@ def trace_prerun(*args, **kwargs):
         return
 
     if config.celery['distributed_tracing']:
-        context = propagator.extract(task.request.get('headers', {}))
+        context = propagator.extract(_get_headers(task.request))
         if context.trace_id:
             pin.tracer.context_provider.activate(context)
 
@@ -113,12 +118,10 @@ def trace_before_publish(*args, **kwargs):
         propagator.inject(span.context, trace_headers)
 
         # This weirdness is due to yet another Celery bug concerning
-        # how headers get propagated in async flows
+        # how headers get propagated warin async flows
         # https://github.com/celery/celery/issues/4875
-        task_headers = kwargs.get('headers') or {}
-        task_headers.setdefault('headers', {})
-        task_headers['headers'].update(trace_headers)
-        kwargs['headers'] = task_headers
+        task_headers = _get_headers(kwargs)
+        task_headers.update(trace_headers)
 
 
 def trace_after_publish(*args, **kwargs):
